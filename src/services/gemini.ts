@@ -1,8 +1,5 @@
 import { GoogleGenAI, Modality, Type } from "@google/genai";
 
-const apiKey = process.env.GEMINI_API_KEY || "";
-const ai = new GoogleGenAI({ apiKey });
-
 export interface HiddenObject {
   name: string;
   description: string;
@@ -15,7 +12,20 @@ export interface GameLevel {
   objects: HiddenObject[];
 }
 
+let manualApiKey: string | null = null;
+
+export function setManualApiKey(key: string) {
+  manualApiKey = key;
+}
+
+function getAI() {
+  // Priority: 1. Manual Key, 2. Selection Dialog Key, 3. Default Env Key
+  const apiKey = manualApiKey || process.env.API_KEY || process.env.GEMINI_API_KEY || "";
+  return new GoogleGenAI({ apiKey });
+}
+
 export async function generateHiddenPicture(theme: string): Promise<string> {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-image",
     contents: {
@@ -41,6 +51,7 @@ export async function generateHiddenPicture(theme: string): Promise<string> {
 }
 
 export async function analyzeImageForObjects(imageUrl: string): Promise<HiddenObject[]> {
+  const ai = getAI();
   const base64Data = imageUrl.split(",")[1];
   
   const response = await ai.models.generateContent({
@@ -87,37 +98,4 @@ export async function analyzeImageForObjects(imageUrl: string): Promise<HiddenOb
   
   const objects = JSON.parse(text);
   return objects.map((obj: any) => ({ ...obj, found: false }));
-}
-
-export async function generateBackgroundMusic(): Promise<string> {
-  const response = await ai.models.generateContentStream({
-    model: "lyria-3-clip-preview",
-    contents: "A whimsical, happy, and lighthearted background music track for a kids' hidden object game. Playful instruments like xylophones, flutes, and soft percussion. Looping, 30 seconds.",
-  });
-
-  let audioBase64 = "";
-  let mimeType = "audio/wav";
-
-  for await (const chunk of response) {
-    const parts = chunk.candidates?.[0]?.content?.parts;
-    if (!parts) continue;
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        if (!audioBase64 && part.inlineData.mimeType) {
-          mimeType = part.inlineData.mimeType;
-        }
-        audioBase64 += part.inlineData.data;
-      }
-    }
-  }
-
-  if (!audioBase64) throw new Error("Failed to generate music");
-
-  const binary = atob(audioBase64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  const blob = new Blob([bytes], { type: mimeType });
-  return URL.createObjectURL(blob);
 }

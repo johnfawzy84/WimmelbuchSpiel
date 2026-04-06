@@ -19,9 +19,18 @@ import confetti from "canvas-confetti";
 import { 
   generateHiddenPicture, 
   analyzeImageForObjects, 
-  generateBackgroundMusic, 
-  HiddenObject 
+  HiddenObject,
+  setManualApiKey
 } from "../services/gemini";
+
+declare global {
+  interface Window {
+    aistudio: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
+  }
+}
 
 const THEMES = [
   "Underwater Kingdom",
@@ -32,6 +41,11 @@ const THEMES = [
   "Pirate Island Treasure",
   "Robot Workshop",
   "Toy Store at Night"
+];
+
+const FREE_MUSIC_TRACKS = [
+  "https://raw.githubusercontent.com/rafaelreis-hotmart/Audio-Sample-files/master/sample.mp3",
+  "https://raw.githubusercontent.com/rafaelreis-hotmart/Audio-Sample-files/master/sample2.mp3"
 ];
 
 type DisplayMode = "text" | "figure" | "both";
@@ -75,6 +89,8 @@ export default function HiddenPictureGame() {
   const [foundCount, setFoundCount] = useState(0);
   const [currentTheme, setCurrentTheme] = useState(THEMES[0]);
   const [displayMode, setDisplayMode] = useState<DisplayMode>("both");
+  const [needsApiKey, setNeedsApiKey] = useState(false);
+  const [inputKey, setInputKey] = useState("");
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -97,13 +113,17 @@ export default function HiddenPictureGame() {
       setObjects(foundObjects);
       
       if (!musicUrl) {
-        setLoadingMessage("🎵 Composing happy tunes...");
-        const music = await generateBackgroundMusic();
-        setMusicUrl(music);
+        // Use a random free track
+        const randomTrack = FREE_MUSIC_TRACKS[Math.floor(Math.random() * FREE_MUSIC_TRACKS.length)];
+        setMusicUrl(randomTrack);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Game start error:", error);
-      setLoadingMessage("Oops! Something went wrong. Let's try again!");
+      if (error?.message?.includes("Requested entity was not found")) {
+        setNeedsApiKey(true);
+      } else {
+        setLoadingMessage("Oops! Something went wrong. Let's try again!");
+      }
     } finally {
       setLoading(false);
     }
@@ -175,6 +195,80 @@ export default function HiddenPictureGame() {
       }
     }
   };
+
+  const handleConnectAI = async () => {
+    if (typeof window !== "undefined" && window.aistudio) {
+      await window.aistudio.openSelectKey();
+      setNeedsApiKey(false);
+      startNewGame();
+    }
+  };
+
+  const handleManualKeySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inputKey.trim()) {
+      setManualApiKey(inputKey.trim());
+      setNeedsApiKey(false);
+      startNewGame();
+    }
+  };
+
+  if (needsApiKey) {
+    return (
+      <div className="min-h-screen bg-[#FFF9E6] flex items-center justify-center p-6">
+        <motion.div 
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="bg-white p-10 rounded-[3rem] shadow-2xl border-8 border-white max-w-md text-center"
+        >
+          <div className="bg-[#FF6B6B] w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-[-5deg] shadow-lg">
+            <Music className="text-white w-10 h-10" />
+          </div>
+          <h2 className="text-3xl font-black text-[#FF6B6B] mb-4">READY TO PLAY?</h2>
+          <p className="text-gray-600 font-medium mb-8">
+            To see the AI worlds, we need to connect to your AI key!
+          </p>
+          
+          <div className="space-y-4">
+            <button 
+              onClick={handleConnectAI}
+              className="w-full bg-[#4ECDC4] text-white py-4 rounded-full font-black text-xl shadow-lg hover:bg-[#45B7AF] transition-colors"
+            >
+              CONNECT TO AI ✨
+            </button>
+
+            <div className="relative flex items-center py-2">
+              <div className="flex-grow border-t border-gray-200"></div>
+              <span className="flex-shrink mx-4 text-gray-400 text-xs font-bold uppercase">or enter manually</span>
+              <div className="flex-grow border-t border-gray-200"></div>
+            </div>
+
+            <form onSubmit={handleManualKeySubmit} className="space-y-3">
+              <input 
+                type="password"
+                placeholder="Paste your API key here..."
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                className="w-full px-6 py-3 bg-gray-50 border-2 border-gray-100 rounded-2xl focus:border-[#FF6B6B] focus:outline-none transition-colors text-sm"
+              />
+              <button 
+                type="submit"
+                disabled={!inputKey.trim()}
+                className="w-full bg-[#FF9F43] text-white py-3 rounded-full font-black shadow-md hover:bg-[#FF8C1A] transition-colors disabled:opacity-50"
+              >
+                USE THIS KEY
+              </button>
+            </form>
+          </div>
+
+          <p className="text-[10px] text-gray-400 mt-8">
+            You'll need a Google Gemini API key. 
+            <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline ml-1">Learn about billing</a>
+          </p>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#FFF9E6] p-4 md:p-8 font-sans text-[#4A4A4A]">
@@ -393,10 +487,21 @@ export default function HiddenPictureGame() {
       {/* Hidden Audio Element */}
       {musicUrl && (
         <audio 
+          key={musicUrl}
           ref={audioRef}
-          src={musicUrl} 
+          src={musicUrl}
           loop 
           autoPlay={!isMuted}
+          onPlay={() => console.log("Music started playing:", musicUrl)}
+          onError={() => {
+            console.error("Audio failed to load:", musicUrl);
+            // If it fails, try the next track after a short delay
+            setTimeout(() => {
+              const currentIndex = FREE_MUSIC_TRACKS.indexOf(musicUrl);
+              const nextIndex = (currentIndex + 1) % FREE_MUSIC_TRACKS.length;
+              setMusicUrl(FREE_MUSIC_TRACKS[nextIndex]);
+            }, 3000);
+          }}
         />
       )}
 
